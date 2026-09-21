@@ -1,0 +1,19 @@
+## .NET
+**/bin/
+**/obj/
+.vs/
+
+## Local configuration and secrets
+*.user
+*.suo
+appsettings.*.local.json
+.env
+.env.*
+!.env.example
+
+## IDE and OS files
+.idea/
+.DS_Store
+
+## Local development data
+docker-data/
