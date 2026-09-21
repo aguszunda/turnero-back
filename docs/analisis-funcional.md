@@ -122,7 +122,7 @@ Desarrollar una aplicación web para la gestión de turnos de una peluquería qu
 | RF-06.3 | Historial de estados del turno (auditoría). | Media |
 
 ### 4.7. Usuarios y autenticación (RF-07)
-> Estado: **en curso** — implementado: registro/login de clientes con JWT, creación de usuarios internos por Admin, roles. Pendiente: recupero de contraseña, perfil.
+> Estado: **implementado parcialmente** — registro/login de clientes con JWT (API) y cookie (UI Blazor), login de usuarios internos por rol, creación de usuarios internos por Admin. Pendiente: recupero de contraseña (RF-07.3), perfil de cliente con historial (RF-07.4).
 
 | ID | Requerimiento | Prioridad |
 |----|---------------|-----------|
@@ -244,6 +244,10 @@ pendiente ──> reservado ──> en_curso ──> completado
 │  Angular CLI 17 │    JSON/JWT    │  ASP.NET Core    │  EF  │              │
 │  Standalone     │                │  Web API (.NET 8)│ Core │              │
 └─────────────────┘                └──────────────────┘      └──────────────┘
+┌─────────────────┐    Cookie      └──────────────────┘
+│  Blazor Web App │ ───────────────►
+│  SSR + Server   │   (UI admin    │  Panel interno embebido en la API
+│  (panel interno)│    interna)    │  (Components/Pages)
 ```
 
 ### Capas del backend (C#)
@@ -253,7 +257,8 @@ pendiente ──> reservado ──> en_curso ──> completado
 4. **DTOs** — contratos de entrada/salida (`CreateTurnoDto`, `TurnoDto`, etc.).
 5. **Seguridad** — JWT (Identity o JWT bearer), roles, RefreshToken.
 
-### Estructura sugerida del proyecto front (Angular)
+### Estructura del front
+**Angular (`turnero-front`)** — front público de reserva de turnos (flujo del cliente: catálogo, disponibilidad, reserva, mis turnos):
 ```
 src/app/
 ├── core/            (auth, guards, interceptores, servicios HTTP)
@@ -266,6 +271,15 @@ src/app/
 │   └── admin/       (usuarios, config, reportes)
 └── shared/          (componentes y pipes reutilizables)
 ```
+
+**Blazor Web App (`Turnero.Api/Components`)** — panel administrativo interno embebido en la API (SSR + Server):
+```
+Components/
+├── Layout/            (MainLayout, NavMenu)
+└── Pages/             (Login, Registro, Logout, Servicios, Profesionales, Agenda, UsuariosAdmin)
+```
+
+*División de responsabilidades (no duplicar pantallas): Angular = flujo público del cliente (JWT); Blazor = operación interna/back-office (cookie). Ambos consumen la misma API `/api/*` y las mismas reglas de dominio.*
 
 ### Puntos críticos de diseño
 - **Concurrencia de reserva**: usar transacción + `SELECT ... FOR UPDATE` sobre `horarios_semanales` o bloqueo optimista (columna `rowversion`) para evitar dobles reservas.

@@ -1,0 +1,150 @@
+@page "/usuarios"
+@attribute [Authorize(Roles = "ADMIN")]
+@rendermode InteractiveServer
+@inject TurneroDbContext Db
+@inject IAuthService AuthService
+
+<PageTitle>Usuarios</PageTitle>
+
+<h1>Usuarios</h1>
+
+@if (Cargando)
+{
+    <p>Cargando...</p>
+}
+else
+{
+    <table>
+        <thead>
+            <tr>
+                <th>Email</th>
+                <th>Nombre</th>
+                <th>Rol</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var u in UsuariosLista.OrderBy(x => x.Email))
+            {
+                <tr>
+                    <td>@u.Email</td>
+                    <td>@u.FirstName @u.LastName</td>
+                    <td>@u.Role</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    <div class="card">
+        <h2>Nuevo usuario interno</h2>
+        <form @onsubmit="CrearUsuario">
+            <div class="fila">
+                <label>Email
+                    <input type="email" @bind="Nuevo.Email" required maxlength="254" />
+                </label>
+                <label>Password (minimo 8)
+                    <input type="password" @bind="Nuevo.Password" minlength="8" required />
+                </label>
+            </div>
+            <div class="fila">
+                <label>Nombre
+                    <input @bind="Nuevo.FirstName" required maxlength="100" />
+                </label>
+                <label>Apellido
+                    <input @bind="Nuevo.LastName" required maxlength="100" />
+                </label>
+                <label>Telefono
+                    <input @bind="Nuevo.Phone" maxlength="40" />
+                </label>
+                <label>Rol
+                    <select @bind="Nuevo.Role">
+                        <option value="RECEPCIONISTA">Recepcionista</option>
+                        <option value="PROFESIONAL">Profesional</option>
+                        <option value="ADMIN">Administrador</option>
+                    </select>
+                </label>
+            </div>
+            <label>Profesional vinculado (solo rol Profesional)
+                <select @bind="Nuevo.ProfessionalId">
+                    <option value="0">Ninguno</option>
+                    @foreach (var p in Profesionales)
+                    {
+                        <option value="@p.Id">@p.FirstName @p.LastName</option>
+                    }
+                </select>
+            </label>
+            @if (MensajeError != null)
+            {
+                <p class="error" role="alert">@MensajeError</p>
+            }
+            @if (MensajeOk != null)
+            {
+                <p class="ok" role="status">@MensajeOk</p>
+            }
+            <button type="submit">Crear</button>
+        </form>
+    </div>
+}
+
+@code {
+    private sealed class NuevoInterno
+    {
+        public string Email = string.Empty;
+        public string Password = string.Empty;
+        public string FirstName = string.Empty;
+        public string LastName = string.Empty;
+        public string? Phone;
+        public string Role = "RECEPCIONISTA";
+        public int ProfessionalId;
+    }
+
+    private List<User> UsuariosLista = [];
+    private List<Professional> Profesionales = [];
+    private bool Cargando = true;
+    private NuevoInterno Nuevo = new();
+    private string? MensajeError;
+    private string? MensajeOk;
+
+    protected override async Task OnInitializedAsync()
+    {
+        UsuariosLista = await Db.Users.AsNoTracking().ToListAsync();
+        Profesionales = await Db.Professionals.AsNoTracking().ToListAsync();
+        Cargando = false;
+    }
+
+    private async Task CrearUsuario()
+    {
+        MensajeError = null;
+        MensajeOk = null;
+
+        if (!Enum.TryParse<UserRole>(Nuevo.Role, out var rol))
+        {
+            MensajeError = "Rol invalido.";
+            return;
+        }
+
+        try
+        {
+            await AuthService.CreateInternalUserAsync(
+                new CreateInternalUserCommand(
+                    Nuevo.Email,
+                    Nuevo.Password,
+                    rol,
+                    Nuevo.FirstName,
+                    Nuevo.LastName,
+                    string.IsNullOrWhiteSpace(Nuevo.Phone) ? null : Nuevo.Phone,
+                    Nuevo.ProfessionalId > 0 ? Nuevo.ProfessionalId : null),
+                CancellationToken.None);
+            MensajeOk = "Usuario creado correctamente.";
+            Nuevo = new();
+            UsuariosLista = await Db.Users.AsNoTracking().ToListAsync();
+        }
+        catch (EmailAlreadyRegisteredException)
+        {
+            MensajeError = "Ese email ya esta registrado.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            MensajeError = ex.Message;
+        }
+    }
+}

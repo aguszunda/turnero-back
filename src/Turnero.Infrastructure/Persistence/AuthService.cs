@@ -46,6 +46,19 @@ public sealed class AuthService(
 
     public async Task<AuthResult> LoginAsync(LoginCommand command, CancellationToken cancellationToken)
     {
+        var user = await ValidateUserAsync(command, cancellationToken);
+        return await BuildResultAsync(user, cancellationToken);
+    }
+
+    public async Task<AuthUser> ValidateAsync(LoginCommand command, CancellationToken cancellationToken)
+    {
+        var user = await ValidateUserAsync(command, cancellationToken);
+        var result = await BuildResultAsync(user, cancellationToken);
+        return result.User;
+    }
+
+    private async Task<User> ValidateUserAsync(LoginCommand command, CancellationToken cancellationToken)
+    {
         var email = NormalizeEmail(command.Email);
         var user = await dbContext.Users.SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
         if (user is null || !user.IsActive ||
@@ -54,7 +67,7 @@ public sealed class AuthService(
             throw new InvalidCredentialsException();
         }
 
-        return await BuildResultAsync(user, cancellationToken);
+        return user;
     }
 
     public async Task<AuthResult> CreateInternalUserAsync(CreateInternalUserCommand command, CancellationToken cancellationToken)

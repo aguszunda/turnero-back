@@ -1,0 +1,21 @@
+@using Microsoft.AspNetCore.Components.Authorization
+
+<nav>
+    <div class="marca">Turnero</div>
+    <AuthorizeView>
+        <Authorized>
+            <div class="usuario">Hola, @context.User.Identity?.Name</div>
+            <NavLink class="nav-link" href="servicios">Servicios</NavLink>
+            <NavLink class="nav-link" href="profesionales">Profesionales</NavLink>
+            <NavLink class="nav-link" href="agenda">Agenda</NavLink>
+            <AuthorizeView Roles="ADMIN" Context="adminContext">
+                <NavLink class="nav-link" href="usuarios">Usuarios</NavLink>
+            </AuthorizeView>
+            <a class="nav-link" href="logout">Salir</a>
+        </Authorized>
+        <NotAuthorized>
+            <NavLink class="nav-link" href="login">Ingresar</NavLink>
+            <NavLink class="nav-link" href="registro">Crear cuenta</NavLink>
+        </NotAuthorized>
+    </AuthorizeView>
+</nav>

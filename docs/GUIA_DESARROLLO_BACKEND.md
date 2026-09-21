@@ -135,6 +135,50 @@ Cliente HTTP -> Controller -> DTO -> DbContext -> PostgreSQL
 5. EF Core persiste la entidad dentro de una transaccion cuando corresponde.
 6. El endpoint devuelve un DTO, nunca una entidad EF directamente.
 
+### 5.1. UI Blazor Web App (panel interno)
+
+La UI administrativa es una **Blazor Web App (.NET 8)** embebida en `Turnero.Api` (misma app, no un proyecto aparte). La raiz `http://localhost:5210/` sirve la UI; la API sigue en `/api/*`.
+
+**Hosting models.** SSR por defecto + interactividad Server por pagina. Se declara con `@rendermode="InteractiveServer"` en cada pagina; las paginas sin esa directiva son SSR estaticas. Configuracion en `Program.cs`:
+
+```csharp
+builder.Services.AddRazorComponents().AddInteractiveServerComponents();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddCascadingAuthenticationState();
+// ...
+app.UseStaticFiles();
+app.UseAntiforgery();
+app.MapRazorComponents<Turnero.Api.Components.App>().AddInteractiveServerRenderMode();
+```
+
+**Dos esquemas de autenticacion.**
+
+- Cookies = esquema por defecto (`AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)`), usado por la UI Blazor via `HttpContext.SignInAsync`.
+- JWT = esquema explicito para la API. Los controllers con `[Authorize]` deben declarar `AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme`.
+- Las paginas protegidas usan `[Authorize]` (o `[Authorize(Roles = "ADMIN")]`).
+
+**Login/Registro/Logout** son paginas SSR estaticas: usan `<form method="post" @formname="...">` con `<AntiforgeryToken />` y `[SupplyParameterFromForm]`. En `OnInitializedAsync` validan con `IAuthService.ValidateAsync`/`RegisterAsync` y firman la cookie. El POST debe incluir `_handler=<formname>` y `__RequestVerificationToken`. Logout llama `HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme)` y redirige.
+
+**Estructura.**
+
+```text
+src/Turnero.Api/
+├── Components/
+│   ├── App.razor            (documento raiz, base href, app.css, blazor.web.js)
+│   ├── Routes.razor         (Router + AuthorizeRouteView)
+│   ├── _Imports.razor       (usings globales de componentes)
+│   ├── Layout/              (MainLayout + NavMenu)
+│   └── Pages/               (Login, Registro, Logout, Servicios, Profesionales, Agenda, UsuariosAdmin)
+└── wwwroot/app.css
+```
+
+**Notas.**
+
+- Los claims de la cookie usan `ClaimTypes` estandar (`Name`, `Email`, `Role`) mas `clienteId`/`profesionalId`, y son los mismos que el JWT.
+- Las paginas interactivas inyectan `TurneroDbContext` directamente (ambito scoped por circuito). Es aceptable para el MVP; a futuro conviene `IDbContextFactory<TurneroDbContext>` para evitar contextos longevos.
+- `IAppointmentService` centraliza la logica de reserva (extraida de `AppointmentsController`); las excepciones `InvalidAppointmentException`/`AppointmentConflictException` se traducen a 400/409 en el controller y a mensajes en pantalla en la UI.
+- Angular se mantiene como front publico de reservas; ver division de responsabilidades en `docs/analisis-funcional.md`.
+
 ## 6. Entidades principales
 
 ### Service
@@ -396,11 +440,11 @@ Tambien verifica que no haya secretos en los archivos modificados, que exista un
 
 ## 13. Proximos pasos
 
-1. Profundizar la integracion de clientes registrados en la reserva (vincular `clienteId` al crear turnos).
-2. Extraer la reserva a un servicio de aplicacion.
-3. Asignar permisos por rol a los endpoints existentes.
+1. Vincular `clienteId` del usuario logueado al crear turnos desde la UI (hoy se registra nombre/telefono libres).
+2. Reprogramar y cancelar turnos (estados + endpoints).
+3. Asignar permisos por rol a los endpoints existentes y a las acciones de la UI Blazor.
 4. Incorporar recuperacion de contrasena y refresh tokens.
-5. Agregar reprogramacion y cancelacion.
-6. Agregar historial de estados.
-7. Agregar pruebas de integracion contra PostgreSQL.
+5. Agregar historial de estados de turno.
+6. Agregar pruebas de integracion contra PostgreSQL (incluyendo concurrencia de reserva).
+7. Migrar las paginas interactivas a `IDbContextFactory<TurneroDbContext>`.
 8. Agregar manejo global de errores y logging estructurado.

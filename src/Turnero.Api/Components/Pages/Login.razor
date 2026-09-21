@@ -1,0 +1,86 @@
+@page "/login"
+@attribute [AllowAnonymous]
+@inject IAuthService Auth
+@inject IHttpContextAccessor HttpContextAccessor
+@inject NavigationManager Navigation
+
+<PageTitle>Ingresar</PageTitle>
+
+<h1>Ingresar</h1>
+
+@if (ErrorEs)
+{
+    <p class="error" role="alert">@MsgError</p>
+}
+
+<form class="card" method="post" @formname="login">
+    <AntiforgeryToken />
+    <label>Email
+        <input type="email" name="email" required autofocus />
+    </label>
+    <label>Contrasena
+        <input type="password" name="password" required />
+    </label>
+    <button type="submit">Ingresar</button>
+</form>
+<p><a href="registro">No tenes cuenta? Registrate</a></p>
+
+@code {
+    [SupplyParameterFromForm]
+    public string? Email { get; set; }
+
+    [SupplyParameterFromForm]
+    public string? Password { get; set; }
+
+    private bool ErrorEs;
+    private string MsgError = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Email) || string.IsNullOrWhiteSpace(Password))
+        {
+            return;
+        }
+
+        if (HttpContextAccessor.HttpContext is not { } httpContext)
+        {
+            return;
+        }
+
+        try
+        {
+            var usuario = await Auth.ValidateAsync(new LoginCommand(Email, Password), CancellationToken.None);
+            await httpContext.SignInAsync(
+                CookieAuthenticationDefaults.AuthenticationScheme,
+                new ClaimsPrincipal(BuildIdentity(usuario)),
+                new AuthenticationProperties { IsPersistent = true });
+            Navigation.NavigateTo("/agenda", forceLoad: true);
+        }
+        catch (InvalidCredentialsException)
+        {
+            ErrorEs = true;
+            MsgError = "Email o contrasena incorrectos.";
+        }
+    }
+
+    private static ClaimsIdentity BuildIdentity(AuthUser usuario)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, usuario.Id.ToString()),
+            new(ClaimTypes.Name, usuario.FirstName),
+            new(ClaimTypes.Surname, usuario.LastName),
+            new(ClaimTypes.Email, usuario.Email),
+            new(ClaimTypes.Role, usuario.Role)
+        };
+        if (usuario.ClientId is { } clientId)
+        {
+            claims.Add(new Claim("clienteId", clientId.ToString()));
+        }
+        if (usuario.ProfessionalId is { } professionalId)
+        {
+            claims.Add(new Claim("profesionalId", professionalId.ToString()));
+        }
+        return new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+    }
+}

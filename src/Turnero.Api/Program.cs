@@ -1,9 +1,11 @@
 using System.Text;
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Turnero.Application.Appointments;
 using Turnero.Application.Auth;
 using Turnero.Domain.Entities;
 using Turnero.Infrastructure.Persistence;
@@ -29,6 +31,12 @@ builder.Services.AddCors(options => options.AddPolicy(corsPolicy, policy =>
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// Blazor UI (SSR + interactive server)
+builder.Services.AddRazorComponents()
+    .AddInteractiveServerComponents();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddCascadingAuthenticationState();
+
 var jwtSection = builder.Configuration.GetSection(JwtOptions.SectionName);
 var jwtOptions = jwtSection.Get<JwtOptions>() ?? new JwtOptions();
 if (string.IsNullOrWhiteSpace(jwtOptions.SigningKey))
@@ -40,8 +48,16 @@ if (string.IsNullOrWhiteSpace(jwtOptions.SigningKey))
 builder.Services.AddSingleton(jwtOptions);
 builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IAppointmentService, AppointmentService>();
 
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+// Cookies es el esquema por defecto (UI Blazor); la API usa JWT explicitamente.
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
+    {
+        options.Cookie.Name = "turnero.auth";
+        options.LoginPath = "/login";
+        options.AccessDeniedPath = "/login";
+    })
     .AddJwtBearer(options =>
     {
         options.TokenValidationParameters = new TokenValidationParameters
@@ -70,12 +86,16 @@ if (app.Environment.IsDevelopment())
     SeedAdministrator(app);
 }
 
+app.UseStaticFiles();
 app.UseCors(corsPolicy);
 
 app.UseAuthentication();
+app.UseAntiforgery();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapRazorComponents<Turnero.Api.Components.App>()
+    .AddInteractiveServerRenderMode();
 
 app.Run();
 

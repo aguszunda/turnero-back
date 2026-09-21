@@ -109,6 +109,46 @@ public sealed class AuthServiceTests
     }
 
     [Fact]
+    public async Task Validate_WithValidCredentials_ReturnsUserWithoutToken()
+    {
+        var db = CreateContext(nameof(Validate_WithValidCredentials_ReturnsUserWithoutToken));
+        var service = CreateService(db);
+        await service.RegisterAsync(
+            new RegisterCommand("val@test.com", "SuperClave1", "Val", "Ida", "+5491111111111"),
+            CancellationToken.None);
+
+        var user = await service.ValidateAsync(
+            new LoginCommand("val@test.com", "SuperClave1"), CancellationToken.None);
+
+        Assert.Equal("val@test.com", user.Email);
+        Assert.Equal("CLIENTE", user.Role);
+        Assert.NotNull(user.ClientId);
+    }
+
+    [Fact]
+    public async Task Validate_WithWrongPassword_Throws()
+    {
+        var db = CreateContext(nameof(Validate_WithWrongPassword_Throws));
+        var service = CreateService(db);
+        await service.RegisterAsync(
+            new RegisterCommand("val2@test.com", "SuperClave1", "Val", "Ida", "+5491111111111"),
+            CancellationToken.None);
+
+        await Assert.ThrowsAsync<InvalidCredentialsException>(() =>
+            service.ValidateAsync(new LoginCommand("val2@test.com", "otra"), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Validate_WithUnknownEmail_Throws()
+    {
+        var db = CreateContext(nameof(Validate_WithUnknownEmail_Throws));
+        var service = CreateService(db);
+
+        await Assert.ThrowsAsync<InvalidCredentialsException>(() =>
+            service.ValidateAsync(new LoginCommand("nadie@test.com", "SuperClave1"), CancellationToken.None));
+    }
+
+    [Fact]
     public async Task CreateInternalUser_Professional_LinksProfileAndReturnsProfessionalId()
     {
         var db = CreateContext(nameof(CreateInternalUser_Professional_LinksProfileAndReturnsProfessionalId));

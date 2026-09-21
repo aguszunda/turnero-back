@@ -1,0 +1,131 @@
+@page "/servicios"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject TurneroDbContext Db
+
+<PageTitle>Servicios</PageTitle>
+
+<h1>Servicios</h1>
+
+@if (Cargando)
+{
+    <p>Cargando...</p>
+}
+else
+{
+    <table>
+        <thead>
+            <tr>
+                <th>Nombre</th>
+                <th>Duracion</th>
+                <th>Precio</th>
+                <th>Categoria</th>
+                <th>Estado</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var s in ListaServicios.OrderBy(x => x.Name))
+            {
+                <tr>
+                    <td>@s.Name</td>
+                    <td>@s.DurationMinutes min</td>
+                    <td>$@s.Price.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)</td>
+                    <td>@(s.Category ?? "-")</td>
+                    <td>@(s.IsActive ? "Activo" : "Inactivo")</td>
+                    <td>
+                        <button class="secondary" @onclick="() => CambiarEstado(s.Id)">
+                            @(s.IsActive ? "Desactivar" : "Activar")
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    <div class="card">
+        <h2>Nuevo servicio</h2>
+        <form @onsubmit="CrearServicio">
+            <div class="fila">
+                <label>Nombre
+                    <input @bind="Nuevo.Name" required maxlength="150" />
+                </label>
+                <label>Duracion (min)
+                    <input type="number" min="1" max="1440" @bind="Nuevo.DurationMinutes" required />
+                </label>
+                <label>Precio
+                    <input type="text" inputmode="decimal" @bind="Nuevo.PrecioTexto" required />
+                </label>
+            </div>
+            <label>Categoria
+                <input @bind="Nuevo.Category" maxlength="100" />
+            </label>
+            <label>Descripcion
+                <textarea @bind="Nuevo.Description" maxlength="1000"></textarea>
+            </label>
+            @if (MensajeError != null)
+            {
+                <p class="error" role="alert">@MensajeError</p>
+            }
+            <button type="submit">Guardar</button>
+        </form>
+    </div>
+}
+
+@code {
+    private sealed class NuevoServicio
+    {
+        public string Name = string.Empty;
+        public int DurationMinutes = 30;
+        public string PrecioTexto = string.Empty;
+        public string? Description;
+        public string? Category;
+    }
+
+    private List<Service> ListaServicios = [];
+    private bool Cargando = true;
+    private NuevoServicio Nuevo = new();
+    private string? MensajeError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        ListaServicios = await Db.Services.AsNoTracking().ToListAsync();
+        Cargando = false;
+    }
+
+    private async Task CambiarEstado(int id)
+    {
+        var servicio = await Db.Services.SingleAsync(x => x.Id == id);
+        servicio.IsActive = !servicio.IsActive;
+        servicio.UpdatedAt = DateTimeOffset.UtcNow;
+        await Db.SaveChangesAsync();
+        ListaServicios = await Db.Services.AsNoTracking().ToListAsync();
+    }
+
+    private async Task CrearServicio()
+    {
+        if (!decimal.TryParse(
+                Nuevo.PrecioTexto,
+                System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var precio))
+        {
+            MensajeError = "El precio debe ser un numero valido (ej: 2500.50).";
+            return;
+        }
+
+        Db.Services.Add(new Service
+        {
+            Name = Nuevo.Name.Trim(),
+            Description = string.IsNullOrWhiteSpace(Nuevo.Description) ? null : Nuevo.Description.Trim(),
+            DurationMinutes = Nuevo.DurationMinutes,
+            Price = precio,
+            Category = string.IsNullOrWhiteSpace(Nuevo.Category) ? null : Nuevo.Category.Trim()
+        });
+        await Db.SaveChangesAsync();
+
+        Nuevo = new();
+        MensajeError = null;
+        ListaServicios = await Db.Services.AsNoTracking().ToListAsync();
+    }
+}

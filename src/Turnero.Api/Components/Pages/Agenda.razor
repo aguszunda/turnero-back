@@ -1,0 +1,242 @@
+@page "/agenda"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject TurneroDbContext Db
+@inject IAppointmentService AppointmentService
+@inject IConfiguration Configuration
+@inject AuthenticationStateProvider AuthProvider
+
+<PageTitle>Agenda</PageTitle>
+
+<h1>Agenda</h1>
+
+@if (Cargando)
+{
+    <p>Cargando...</p>
+}
+else
+{
+    <form class="card" @onsubmit="CargarDia">
+        <label>Fecha
+            <input type="date" @bind="Fecha" />
+        </label>
+        <button type="submit">Ver turnos</button>
+    </form>
+
+    @if (TurnosDelDia.Count == 0)
+    {
+        <p>No hay turnos para este dia.</p>
+    }
+    else
+    {
+        <table>
+            <thead>
+                <tr>
+                    <th>Hora</th>
+                    <th>Cliente</th>
+                    <th>Telefono</th>
+                    <th>Servicio</th>
+                    <th>Profesional</th>
+                    <th>Estado</th>
+                    <th>Precio</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var t in TurnosDelDia)
+                {
+                    <tr>
+                        <td>@t.HoraLocal</td>
+                        <td>@t.ClientName</td>
+                        <td>@t.ClientPhone</td>
+                        <td>@t.ServicioNombre</td>
+                        <td>@t.ProfesionalNombre</td>
+                        <td>@t.Estado</td>
+                        <td>$@t.Precio.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    <div class="card">
+        <h2>Nuevo turno</h2>
+        <form @onsubmit="CrearTurno">
+            <div class="fila">
+                <label>Servicio
+                    <select @bind="NuevoServiceId" @bind:after="CambiarServicio">
+                        <option value="0">Seleccionar</option>
+                        @foreach (var s in ServiciosActivos)
+                        {
+                            <option value="@s.Id">@s.Name ($@s.Price.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture))</option>
+                        }
+                    </select>
+                </label>
+                <label>Profesional
+                    <select @bind="NuevoProfessionalId">
+                        <option value="0">Seleccionar</option>
+                        @foreach (var p in ProfesionalesParaServicio)
+                        {
+                            <option value="@p.Id">@p.FirstName @p.LastName</option>
+                        }
+                    </select>
+                </label>
+            </div>
+            <div class="fila">
+                <label>Nombre del cliente
+                    <input @bind="NuevoClientName" required maxlength="200" />
+                </label>
+                <label>Telefono
+                    <input @bind="NuevoClientPhone" required maxlength="40" />
+                </label>
+                <label>Fecha y hora
+                    <input type="datetime-local" @bind="NuevoInicio" required />
+                </label>
+            </div>
+            @if (MensajeError != null)
+            {
+                <p class="error" role="alert">@MensajeError</p>
+            }
+            @if (MensajeOk != null)
+            {
+                <p class="ok" role="status">@MensajeOk</p>
+            }
+            <button type="submit">Reservar</button>
+        </form>
+    </div>
+}
+
+@code {
+    private sealed record TurnoDia(
+        DateTimeOffset StartsAt,
+        string HoraLocal,
+        string ClientName,
+        string ClientPhone,
+        string ServicioNombre,
+        string ProfesionalNombre,
+        string Estado,
+        decimal Precio);
+
+    private List<Service> ServiciosActivos = [];
+    private List<Professional> ProfesionalesParaServicio = [];
+    private List<TurnoDia> TurnosDelDia = [];
+    private bool Cargando = true;
+    private DateTime Fecha = DateTime.Today;
+    private int NuevoServiceId;
+    private int NuevoProfessionalId;
+    private string NuevoClientName = string.Empty;
+    private string NuevoClientPhone = string.Empty;
+    private DateTime NuevoInicio = DateTime.Now.AddDays(1);
+    private string? MensajeError;
+    private string? MensajeOk;
+    private TimeZoneInfo ZonaHoraria = TimeZoneInfo.Utc;
+
+    protected override async Task OnInitializedAsync()
+    {
+        ZonaHoraria = TimeZoneInfo.FindSystemTimeZoneById(
+            Configuration["Business:TimeZone"] ?? "America/Argentina/Buenos_Aires");
+        Fecha = DateTime.Today;
+        ServiciosActivos = await Db.Services.Where(x => x.IsActive).AsNoTracking().ToListAsync();
+
+        var authState = await AuthProvider.GetAuthenticationStateAsync();
+        var clienteId = authState.User.FindFirstValue("clienteId");
+        if (clienteId is not null)
+        {
+            var cliente = await Db.Clientes.AsNoTracking().SingleOrDefaultAsync(x => x.Id == int.Parse(clienteId));
+            if (cliente is not null)
+            {
+                NuevoClientName = $"{cliente.FirstName} {cliente.LastName}".Trim();
+                NuevoClientPhone = cliente.Phone;
+            }
+        }
+
+        await CargarDia();
+        await CargarProfesionales();
+    }
+
+    private async Task CargarDia()
+    {
+        MensajeError = null;
+        MensajeOk = null;
+
+        var fecha = DateOnly.FromDateTime(Fecha);
+        var inicioLocal = new DateTimeOffset(fecha.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified), ZonaHoraria.GetUtcOffset(fecha.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified)));
+        var finLocal = inicioLocal.AddDays(1);
+
+        var turnos = await Db.Appointments
+            .AsNoTracking()
+            .Include(x => x.Service)
+            .Include(x => x.Professional)
+            .Where(x => x.StartsAt >= inicioLocal.ToUniversalTime() && x.StartsAt < finLocal.ToUniversalTime())
+            .OrderBy(x => x.StartsAt)
+            .ToListAsync();
+
+        TurnosDelDia = turnos.Select(t => new TurnoDia(
+            t.StartsAt,
+            TimeZoneInfo.ConvertTime(t.StartsAt, ZonaHoraria).ToString("HH:mm"),
+            t.ClientName,
+            t.ClientPhone,
+            t.Service.Name,
+            $"{t.Professional.FirstName} {t.Professional.LastName}",
+            t.Status.ToString(),
+            t.AppliedPrice)).ToList();
+
+        Cargando = false;
+    }
+
+    private async Task CambiarServicio()
+    {
+        NuevoProfessionalId = 0;
+        await CargarProfesionales();
+    }
+
+    private async Task CargarProfesionales()
+    {
+        if (NuevoServiceId <= 0)
+        {
+            ProfesionalesParaServicio = [];
+            return;
+        }
+
+        ProfesionalesParaServicio = await Db.Professionals
+            .Include(x => x.Services)
+            .AsNoTracking()
+            .Where(x => x.IsActive && x.Services.Any(s => s.ServiceId == NuevoServiceId))
+            .ToListAsync();
+    }
+
+    private async Task CrearTurno()
+    {
+        MensajeError = null;
+        MensajeOk = null;
+
+        if (NuevoServiceId <= 0 || NuevoProfessionalId <= 0)
+        {
+            MensajeError = "Selecciona un servicio y un profesional.";
+            return;
+        }
+
+        var inicioLocal = new DateTimeOffset(DateTime.SpecifyKind(NuevoInicio, DateTimeKind.Unspecified), ZonaHoraria.GetUtcOffset(NuevoInicio));
+
+        try
+        {
+            await AppointmentService.CreateAsync(
+                new CreateAppointmentCommand(
+                    NuevoServiceId,
+                    NuevoProfessionalId,
+                    NuevoClientName,
+                    NuevoClientPhone,
+                    inicioLocal),
+                CancellationToken.None);
+            MensajeOk = "Turno reservado correctamente.";
+            await CargarDia();
+        }
+        catch (InvalidAppointmentException ex)
+        {
+            MensajeError = ex.Message;
+        }
+        catch (AppointmentConflictException ex)
+        {
+            MensajeError = ex.Message;
+        }
+    }
+}

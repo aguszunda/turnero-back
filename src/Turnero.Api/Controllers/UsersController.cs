@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Turnero.Api.Contracts;
@@ -7,7 +8,7 @@ namespace Turnero.Api.Controllers;
 
 [ApiController]
 [Route("api/users")]
-[Authorize(Roles = "ADMIN")]
+[Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme, Roles = "ADMIN")]
 public sealed class UsersController(IAuthService authService) : ControllerBase
 {
     [HttpPost]

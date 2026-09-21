@@ -1,0 +1,101 @@
+@page "/registro"
+@attribute [AllowAnonymous]
+@inject IAuthService Auth
+@inject IHttpContextAccessor HttpContextAccessor
+@inject NavigationManager Navigation
+
+<PageTitle>Crear cuenta</PageTitle>
+
+<h1>Crear cuenta</h1>
+
+@if (ErrorEs)
+{
+    <p class="error" role="alert">@MsgError</p>
+}
+
+<form class="card" method="post" @formname="registro">
+    <AntiforgeryToken />
+    <div class="fila">
+        <label>Nombre
+            <input type="text" name="firstname" required />
+        </label>
+        <label>Apellido
+            <input type="text" name="lastname" required />
+        </label>
+    </div>
+    <label>Email
+        <input type="email" name="email" required />
+    </label>
+    <label>Telefono
+        <input type="tel" name="phone" required />
+    </label>
+    <label>Contrasena (minimo 8 caracteres)
+        <input type="password" name="password" minlength="8" required />
+    </label>
+    <button type="submit">Crear cuenta</button>
+</form>
+<p><a href="login">Ya tenes cuenta? Ingresa</a></p>
+
+@code {
+    [SupplyParameterFromForm]
+    public string? FirstName { get; set; }
+
+    [SupplyParameterFromForm]
+    public string? LastName { get; set; }
+
+    [SupplyParameterFromForm]
+    public string? Email { get; set; }
+
+    [SupplyParameterFromForm]
+    public string? Phone { get; set; }
+
+    [SupplyParameterFromForm]
+    public string? Password { get; set; }
+
+    private bool ErrorEs;
+    private string MsgError = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (string.IsNullOrWhiteSpace(FirstName) || string.IsNullOrWhiteSpace(LastName) ||
+            string.IsNullOrWhiteSpace(Email) || string.IsNullOrWhiteSpace(Phone) ||
+            string.IsNullOrWhiteSpace(Password) || HttpContextAccessor.HttpContext is not { } httpContext)
+        {
+            return;
+        }
+
+        try
+        {
+            var resultado = await Auth.RegisterAsync(
+                new RegisterCommand(FirstName, LastName, Email, Phone, Password),
+                CancellationToken.None);
+            await httpContext.SignInAsync(
+                CookieAuthenticationDefaults.AuthenticationScheme,
+                new ClaimsPrincipal(BuildIdentity(resultado.User)),
+                new AuthenticationProperties { IsPersistent = true });
+            Navigation.NavigateTo("/agenda", forceLoad: true);
+        }
+        catch (EmailAlreadyRegisteredException)
+        {
+            ErrorEs = true;
+            MsgError = "Ese email ya esta registrado.";
+        }
+    }
+
+    private static ClaimsIdentity BuildIdentity(AuthUser usuario)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, usuario.Id.ToString()),
+            new(ClaimTypes.Name, usuario.FirstName),
+            new(ClaimTypes.Surname, usuario.LastName),
+            new(ClaimTypes.Email, usuario.Email),
+            new(ClaimTypes.Role, usuario.Role)
+        };
+        if (usuario.ClientId is { } clientId)
+        {
+            claims.Add(new Claim("clienteId", clientId.ToString()));
+        }
+        return new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+    }
+}

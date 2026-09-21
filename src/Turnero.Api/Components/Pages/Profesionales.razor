@@ -1,0 +1,240 @@
+@page "/profesionales"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject TurneroDbContext Db
+
+<PageTitle>Profesionales</PageTitle>
+
+<h1>Profesionales</h1>
+
+@if (Cargando)
+{
+    <p>Cargando...</p>
+}
+else
+{
+    <table>
+        <thead>
+            <tr>
+                <th>Nombre</th>
+                <th>Especialidad</th>
+                <th>Servicios</th>
+                <th>Horario semanal</th>
+                <th>Estado</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var p in ListaProfesionales.OrderBy(x => x.LastName))
+            {
+                <tr>
+                    <td>@p.FirstName @p.LastName</td>
+                    <td>@(p.Specialty ?? "-")</td>
+                    <td>@string.Join(", ", p.Services.Select(x => x.Service?.Name))</td>
+                    <td>@FormatearHorarios(p.WeeklySchedules)</td>
+                    <td>@(p.IsActive ? "Activo" : "Inactivo")</td>
+                    <td>
+                        <button class="secondary" @onclick="() => CambiarEstado(p.Id)">
+                            @(p.IsActive ? "Desactivar" : "Activar")
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    <div class="card">
+        <h2>Nuevo profesional</h2>
+        <form @onsubmit="CrearProfesional">
+            <div class="fila">
+                <label>Nombre
+                    <input @bind="Nuevo.FirstName" required maxlength="100" />
+                </label>
+                <label>Apellido
+                    <input @bind="Nuevo.LastName" required maxlength="100" />
+                </label>
+            </div>
+            <div class="fila">
+                <label>Telefono
+                    <input @bind="Nuevo.Phone" maxlength="40" />
+                </label>
+                <label>Email
+                    <input type="email" @bind="Nuevo.Email" maxlength="254" />
+                </label>
+                <label>Especialidad
+                    <input @bind="Nuevo.Specialty" maxlength="100" />
+                </label>
+            </div>
+
+            <fieldset>
+                <legend>Servicios que presta</legend>
+                <div class="fila">
+                    @foreach (var s in TodosLosServicios)
+                    {
+                        <label>
+                            <input type="checkbox" value="@s.Id" @bind="ServicioSeleccionado[s.Id]" />
+                            @s.Name
+                        </label>
+                    }
+                </div>
+            </fieldset>
+
+            <h3>Horario (opcional, un dia)</h3>
+            <div class="fila">
+                <label>Dia
+                    <select @bind="Nuevo.DayOfWeek">
+                        <option value="-1">Seleccionar</option>
+                        @for (var i = 0; i < 7; i++)
+                        {
+                            <option value="@i">@NombresDias[i]</option>
+                        }
+                    </select>
+                </label>
+                <label>Entrada <input type="time" @bind="Nuevo.StartTime" /></label>
+                <label>Salida <input type="time" @bind="Nuevo.EndTime" /></label>
+                <label>Inicio descanso <input type="time" @bind="Nuevo.BreakStart" /></label>
+                <label>Fin descanso <input type="time" @bind="Nuevo.BreakEnd" /></label>
+                <label>Margen (min)
+                    <input type="number" min="0" max="240" @bind="Nuevo.MarginMinutes" />
+                </label>
+            </div>
+
+            @if (MensajeError != null)
+            {
+                <p class="error" role="alert">@MensajeError</p>
+            }
+            <button type="submit">Guardar</button>
+        </form>
+    </div>
+}
+
+@code {
+    private static readonly string[] NombresDias =
+        ["Domingo", "Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado"];
+
+    private sealed class NuevoProfesional
+    {
+        public string FirstName = string.Empty;
+        public string LastName = string.Empty;
+        public string? Phone;
+        public string? Email;
+        public string? Specialty;
+        public int DayOfWeek = -1;
+        public TimeOnly? StartTime;
+        public TimeOnly? EndTime;
+        public TimeOnly? BreakStart;
+        public TimeOnly? BreakEnd;
+        public int MarginMinutes;
+    }
+
+    private List<Professional> ListaProfesionales = [];
+    private List<Service> TodosLosServicios = [];
+    private bool Cargando = true;
+    private NuevoProfesional Nuevo = new();
+    private string? MensajeError;
+    private Dictionary<int, bool> ServicioSeleccionado = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        ListaProfesionales = await Db.Professionals
+            .Include(x => x.Services).ThenInclude(x => x.Service)
+            .Include(x => x.WeeklySchedules)
+            .AsNoTracking()
+            .ToListAsync();
+        TodosLosServicios = await Db.Services.AsNoTracking().ToListAsync();
+        foreach (var s in TodosLosServicios)
+        {
+            ServicioSeleccionado[s.Id] = false;
+        }
+        Cargando = false;
+    }
+
+    private async Task CambiarEstado(int id)
+    {
+        var profesional = await Db.Professionals.SingleAsync(x => x.Id == id);
+        profesional.IsActive = !profesional.IsActive;
+        await Db.SaveChangesAsync();
+        ListaProfesionales = await Db.Professionals
+            .Include(x => x.Services).ThenInclude(x => x.Service)
+            .Include(x => x.WeeklySchedules)
+            .AsNoTracking()
+            .ToListAsync();
+    }
+
+    private async Task CrearProfesional()
+    {
+        if (ServicioSeleccionado.Values.All(v => !v))
+        {
+            MensajeError = "Selecciona al menos un servicio que presta el profesional.";
+            return;
+        }
+
+        if (Nuevo.DayOfWeek >= 0 &&
+            (!Nuevo.StartTime.HasValue || !Nuevo.EndTime.HasValue))
+        {
+            MensajeError = "Si indicas un dia, completa la hora de entrada y salida.";
+            return;
+        }
+
+        var serviciosSeleccionados = ServicioSeleccionado
+            .Where(x => x.Value)
+            .Select(x => new ProfessionalService { ServiceId = x.Key })
+            .ToList();
+
+        var horarios = new List<WeeklySchedule>();
+        if (Nuevo.DayOfWeek >= 0)
+        {
+            horarios.Add(new WeeklySchedule
+            {
+                DayOfWeek = Nuevo.DayOfWeek,
+                StartTime = Nuevo.StartTime!.Value,
+                EndTime = Nuevo.EndTime!.Value,
+                BreakStart = Nuevo.BreakStart,
+                BreakEnd = Nuevo.BreakEnd,
+                MarginMinutes = Nuevo.MarginMinutes
+            });
+        }
+
+        Db.Professionals.Add(new Professional
+        {
+            FirstName = Nuevo.FirstName.Trim(),
+            LastName = Nuevo.LastName.Trim(),
+            Phone = string.IsNullOrWhiteSpace(Nuevo.Phone) ? null : Nuevo.Phone.Trim(),
+            Email = string.IsNullOrWhiteSpace(Nuevo.Email) ? null : Nuevo.Email.Trim().ToLowerInvariant(),
+            Specialty = string.IsNullOrWhiteSpace(Nuevo.Specialty) ? null : Nuevo.Specialty.Trim(),
+            Services = serviciosSeleccionados,
+            WeeklySchedules = horarios
+        });
+        await Db.SaveChangesAsync();
+
+        Nuevo = new();
+        MensajeError = null;
+        foreach (var clave in ServicioSeleccionado.Keys)
+        {
+            ServicioSeleccionado[clave] = false;
+        }
+        ListaProfesionales = await Db.Professionals
+            .Include(x => x.Services).ThenInclude(x => x.Service)
+            .Include(x => x.WeeklySchedules)
+            .AsNoTracking()
+            .ToListAsync();
+    }
+
+    private static string FormatearHorarios(ICollection<WeeklySchedule> horarios)
+    {
+        if (horarios.Count == 0)
+        {
+            return "-";
+        }
+
+        return string.Join(", ", horarios
+            .OrderBy(x => x.DayOfWeek)
+            .Select(x =>
+            {
+                var descanso = x.BreakStart.HasValue
+                    ? $" (desc: {x.BreakStart:HH:mm}-{x.BreakEnd:HH:mm})"
+                    : string.Empty;
+                return $"{NombresDias[x.DayOfWeek]} {x.StartTime:HH:mm}-{x.EndTime:HH:mm}{descanso}";
+            }));
+    }
+}
