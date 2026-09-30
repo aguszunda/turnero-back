@@ -135,50 +135,6 @@ Cliente HTTP -> Controller -> DTO -> DbContext -> PostgreSQL
 5. EF Core persiste la entidad dentro de una transaccion cuando corresponde.
 6. El endpoint devuelve un DTO, nunca una entidad EF directamente.
 
-### 5.1. UI Blazor Web App (panel interno)
-
-La UI administrativa es una **Blazor Web App (.NET 8)** embebida en `Turnero.Api` (misma app, no un proyecto aparte). La raiz `http://localhost:5210/` sirve la UI; la API sigue en `/api/*`.
-
-**Hosting models.** SSR por defecto + interactividad Server por pagina. Se declara con `@rendermode="InteractiveServer"` en cada pagina; las paginas sin esa directiva son SSR estaticas. Configuracion en `Program.cs`:
-
-```csharp
-builder.Services.AddRazorComponents().AddInteractiveServerComponents();
-builder.Services.AddHttpContextAccessor();
-builder.Services.AddCascadingAuthenticationState();
-// ...
-app.UseStaticFiles();
-app.UseAntiforgery();
-app.MapRazorComponents<Turnero.Api.Components.App>().AddInteractiveServerRenderMode();
-```
-
-**Dos esquemas de autenticacion.**
-
-- Cookies = esquema por defecto (`AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)`), usado por la UI Blazor via `HttpContext.SignInAsync`.
-- JWT = esquema explicito para la API. Los controllers con `[Authorize]` deben declarar `AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme`.
-- Las paginas protegidas usan `[Authorize]` (o `[Authorize(Roles = "ADMIN")]`).
-
-**Login/Registro/Logout** son paginas SSR estaticas: usan `<form method="post" @formname="...">` con `<AntiforgeryToken />` y `[SupplyParameterFromForm]`. En `OnInitializedAsync` validan con `IAuthService.ValidateAsync`/`RegisterAsync` y firman la cookie. El POST debe incluir `_handler=<formname>` y `__RequestVerificationToken`. Logout llama `HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme)` y redirige.
-
-**Estructura.**
-
-```text
-src/Turnero.Api/
-├── Components/
-│   ├── App.razor            (documento raiz, base href, app.css, blazor.web.js)
-│   ├── Routes.razor         (Router + AuthorizeRouteView)
-│   ├── _Imports.razor       (usings globales de componentes)
-│   ├── Layout/              (MainLayout + NavMenu)
-│   └── Pages/               (Login, Registro, Logout, Servicios, Profesionales, Agenda, UsuariosAdmin)
-└── wwwroot/app.css
-```
-
-**Notas.**
-
-- Los claims de la cookie usan `ClaimTypes` estandar (`Name`, `Email`, `Role`) mas `clienteId`/`profesionalId`, y son los mismos que el JWT.
-- Las paginas interactivas inyectan `TurneroDbContext` directamente (ambito scoped por circuito). Es aceptable para el MVP; a futuro conviene `IDbContextFactory<TurneroDbContext>` para evitar contextos longevos.
-- `IAppointmentService` centraliza la logica de reserva (extraida de `AppointmentsController`); las excepciones `InvalidAppointmentException`/`AppointmentConflictException` se traducen a 400/409 en el controller y a mensajes en pantalla en la UI.
-- Angular se mantiene como front publico de reservas; ver division de responsabilidades en `docs/analisis-funcional.md`.
-
 ## 6. Entidades principales
 
 ### Service
@@ -440,11 +396,76 @@ Tambien verifica que no haya secretos en los archivos modificados, que exista un
 
 ## 13. Proximos pasos
 
-1. Vincular `clienteId` del usuario logueado al crear turnos desde la UI (hoy se registra nombre/telefono libres).
-2. Reprogramar y cancelar turnos (estados + endpoints).
-3. Asignar permisos por rol a los endpoints existentes y a las acciones de la UI Blazor.
+1. Profundizar la integracion de clientes registrados en la reserva (vincular `clienteId` al crear turnos).
+2. Extraer la reserva a un servicio de aplicacion.
+3. Asignar permisos por rol a los endpoints existentes.
 4. Incorporar recuperacion de contrasena y refresh tokens.
-5. Agregar historial de estados de turno.
-6. Agregar pruebas de integracion contra PostgreSQL (incluyendo concurrencia de reserva).
-7. Migrar las paginas interactivas a `IDbContextFactory<TurneroDbContext>`.
+5. Agregar reprogramacion y cancelacion.
+6. Agregar historial de estados.
+7. Agregar pruebas de integracion contra PostgreSQL.
 8. Agregar manejo global de errores y logging estructurado.
+
+---
+
+## Anexo A. Error "Failed to bind to address ... address already in use"
+
+Cuando ejecutas `dotnet run --project src/Turnero.Api` y aparece:
+
+```text
+System.IO.IOException: Failed to bind to address http://127.0.0.1:5210: address already in use.
+```
+
+significa que **ya hay una instancia de la API corriendo en el puerto 5210** (por ejemplo, quedó abierta de una sesion anterior, la levanto VS Code con F5, o se ejecuto con `nohup dotnet run ...` en otra terminal). El nuevo proceso no puede entrar al mismo puerto.
+
+### 1. Identificar el proceso que lo ocupa
+
+```bash
+lsof -nP -iTCP:5210 -sTCP:LISTEN
+```
+
+La salida muestra los procesos con el puerto en escucha. La columna `COMMAND` suele aparecer como `Turnero.A` / `dotnet`, y `PID` es el identificador del proceso:
+
+```text
+COMMAND     PID    USER   FD   TYPE   ...  NAME
+Turnero.A 31105 agustin  359u  IPv4  ...  TCP 127.0.0.1:5210 (LISTEN)
+```
+
+### 2. Matar esa instancia (opciones)
+
+```bash
+# Matar por el PID del paso 1
+kill 31105
+
+# Alternativa: matar por nombre (mata todas las instancias de Turnero.Api)
+pkill -f Turnero.Api
+
+# Si no responde, forzar el cierre
+kill -9 31105
+```
+
+### 3. Verificar que quedo libre y volver a arrancar
+
+```bash
+lsof -nP -iTCP:5210 -sTCP:LISTEN   # no debe devolver nada
+dotnet run --project src/Turnero.Api
+```
+
+### 4. Alternativa: arrancar en otro puerto
+
+Si no queres matar la instancia actual, levantala en otro puerto sin tocar `launchSettings.json`:
+
+```bash
+dotnet run --project src/Turnero.Api --urls http://localhost:5211
+```
+
+Ajusta en ese caso `http://localhost:5211` en el frontend Angular (`environment.development.ts`) y en Swagger.
+
+### Causas tipicas
+
+- Una instancia levantada con `nohup ... &` que nunca se cierra.
+- VS Code / Rider con "Start without debugging" de una corrida anterior.
+- DOS `dotnet run` duplicados: solo puede existir uno por puerto.
+
+### Recordatorio
+
+El puerto 5210 lo fija el perfil `http` en `src/Turnero.Api/Properties/launchSettings.json`. Si queres usar otro puerto fijo, cámbialo ahi y actualiza tambien la URL del frontend.
